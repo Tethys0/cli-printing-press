@@ -23,7 +23,7 @@ func generateLearnStore(t *testing.T, name string, learnEnabled bool) (string, s
 	}
 	outputDir := filepath.Join(t.TempDir(), name+"-pp-cli")
 	gen := New(apiSpec, outputDir)
-	gen.VisionSet = VisionTemplateSet{Store: true}
+	gen.VisionSet = VisionTemplateSet{Store: true, MCP: true}
 	require.NoError(t, gen.Generate())
 
 	storeGo, err := os.ReadFile(filepath.Join(outputDir, "internal", "store", "store.go"))
