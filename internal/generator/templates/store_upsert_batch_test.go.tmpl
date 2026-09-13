@@ -1088,6 +1088,71 @@ func TestSearchQuotesFTSQuerySyntax(t *testing.T) {
 	}
 }
 
+func TestSearch_CJKSubstringAndASCII(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "data.db")
+	s, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer s.Close()
+
+	items := []json.RawMessage{
+		json.RawMessage(`{"id":"C01636","name":"統全公寓大廈管理維護有限公司","trade":"營造工程行"}`),
+		json.RawMessage(`{"id":"ascii-1","name":"Pinky restaurant"}`),
+	}
+	if stored, failed, err := s.UpsertBatch("eix", items); err != nil {
+		t.Fatalf("UpsertBatch: %v", err)
+	} else if failed != 0 || stored != len(items) {
+		t.Fatalf("UpsertBatch stored=%d failed=%d, want stored=%d failed=0", stored, failed, len(items))
+	}
+
+	for _, tc := range []struct {
+		query string
+		want  string
+	}{
+		{query: "營造", want: "C01636"},
+		{query: "營造工程", want: "C01636"},
+		{query: "統全公寓大廈管理維護有限公司", want: "C01636"},
+		{query: "C01636", want: "C01636"},
+		{query: "restaurant", want: "ascii-1"},
+	} {
+		results, err := s.Search(tc.query, 10)
+		if err != nil {
+			t.Fatalf("Search(%q): %v", tc.query, err)
+		}
+		if len(results) != 1 || !strings.Contains(string(results[0]), tc.want) {
+			t.Fatalf("Search(%q) = %q, want one hit containing %q", tc.query, results, tc.want)
+		}
+	}
+}
+
+func TestSearch_LikeEscapesWildcards(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "data.db")
+	s, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer s.Close()
+
+	items := []json.RawMessage{
+		json.RawMessage(`{"id":"pct","note":"100% complete"}`),
+		json.RawMessage(`{"id":"other","note":"1000 complete"}`),
+	}
+	if stored, failed, err := s.UpsertBatch("notes", items); err != nil {
+		t.Fatalf("UpsertBatch: %v", err)
+	} else if failed != 0 || stored != len(items) {
+		t.Fatalf("UpsertBatch stored=%d failed=%d, want stored=%d failed=0", stored, failed, len(items))
+	}
+
+	results, err := s.Search("0%", 10)
+	if err != nil {
+		t.Fatalf("Search(0%%): %v", err)
+	}
+	if len(results) != 1 || !strings.Contains(string(results[0]), `"pct"`) {
+		t.Fatalf("Search(0%%) = %q, want only the percent row", results)
+	}
+}
+
 func TestFTSMatchQuerySanitizesPunctuation(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "data.db")
 	s, err := Open(dbPath)
