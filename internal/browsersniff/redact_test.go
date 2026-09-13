@@ -195,6 +195,64 @@ func TestRedactJSONBody_EmptyBodyReturnsEmpty(t *testing.T) {
 	assert.Nil(t, paths2)
 }
 
+func TestRedactJSONBody_NestedAuthorizationHeaderValue(t *testing.T) {
+	t.Parallel()
+
+	const basicBlob = "QWxpY2U6c2VjcmV0MTIz"
+	body := `{"name":"headers","formulaMap":{"Content-Type":"\"application/json\"","Authorization":"\"Basic ` + basicBlob + `\""}}`
+	redacted, paths := RedactJSONBody(body)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(redacted), &parsed))
+	formula, ok := parsed["formulaMap"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, RedactedSentinel, formula["Authorization"])
+	assert.Equal(t, `"application/json"`, formula["Content-Type"])
+	assert.NotContains(t, redacted, basicBlob)
+	assert.Contains(t, paths, "formulaMap.Authorization")
+}
+
+func TestRedactJSONBody_AuthSchemeValueWithoutHeaderKey(t *testing.T) {
+	t.Parallel()
+
+	body := `{"note":"Bearer sk_live_abcdefghijklmnop"}`
+	redacted, paths := RedactJSONBody(body)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(redacted), &parsed))
+	assert.Equal(t, RedactedSentinel, parsed["note"])
+	assert.Contains(t, paths, "note.pattern:auth-scheme")
+}
+
+func TestRedactJSONBody_UserPassBase64Value(t *testing.T) {
+	t.Parallel()
+
+	const blob = "QWxpY2U6c2VjcmV0MTIz"
+	body := `{"value":"` + blob + `","keep":"ok"}`
+	redacted, paths := RedactJSONBody(body)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(redacted), &parsed))
+	assert.Equal(t, RedactedSentinel, parsed["value"])
+	assert.Equal(t, "ok", parsed["keep"])
+	assert.Contains(t, paths, "value.pattern:basic-credential")
+}
+
+func TestRedactJSONBody_PreservesURLPathBase64Segments(t *testing.T) {
+	t.Parallel()
+
+	const pathSeg = "QWxpY2U6c2VjcmV0MTIz"
+	body := `{"url":"https://cdn.example.com/objects/` + pathSeg + `/meta","host":"cdn.example.com","path":"/objects/` + pathSeg + `/meta"}`
+	redacted, paths := RedactJSONBody(body)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(redacted), &parsed))
+	assert.Equal(t, "https://cdn.example.com/objects/"+pathSeg+"/meta", parsed["url"])
+	assert.Equal(t, "cdn.example.com", parsed["host"])
+	assert.Equal(t, "/objects/"+pathSeg+"/meta", parsed["path"])
+	assert.Empty(t, paths)
+}
+
 func TestRedactJSONBody_PhoneRequiresPlusPrefix(t *testing.T) {
 	t.Parallel()
 

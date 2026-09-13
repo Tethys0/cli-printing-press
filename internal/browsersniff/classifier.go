@@ -560,7 +560,7 @@ func normalizeEntryPathWithHints(rawURL string) (string, []LowConfidenceParamete
 			placeholder = idPlaceholder(parent, "uuid")
 		case hashSegmentPattern.MatchString(segment):
 			placeholder = idPlaceholder(parent, "hash")
-		case prefixedIDPattern.MatchString(segment):
+		case looksPrefixedOpaqueID(segment):
 			placeholder = idPlaceholder(parent, "id")
 		case colonCompositePattern.MatchString(segment) && hasNonTrivialToken(segment):
 			placeholder = idPlaceholder(parent, "id")
@@ -751,6 +751,20 @@ func hasNonTrivialToken(segment string) bool {
 	return false
 }
 
+// looksPrefixedOpaqueID requires a short type prefix plus an opaque tail.
+// Ordinary lowercase snake_case route words such as "read_progresses" match
+// the prefix/length shape but are literals, not application IDs.
+func looksPrefixedOpaqueID(segment string) bool {
+	if !prefixedIDPattern.MatchString(segment) {
+		return false
+	}
+	_, tail, ok := strings.Cut(segment, "_")
+	if !ok {
+		return false
+	}
+	return looksOpaqueID(tail)
+}
+
 // looksLikeIDShape returns true when a segment matches any of the strong ID
 // heuristics (UUID, hex hash, numeric, prefixed application id, colon
 // composite, or long opaque alphanumeric). These are the same shapes the
@@ -766,7 +780,7 @@ func looksLikeIDShape(segment string) bool {
 	if hashSegmentPattern.MatchString(segment) {
 		return true
 	}
-	if prefixedIDPattern.MatchString(segment) {
+	if looksPrefixedOpaqueID(segment) {
 		return true
 	}
 	if colonCompositePattern.MatchString(segment) && hasNonTrivialToken(segment) {
