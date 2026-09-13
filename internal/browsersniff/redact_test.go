@@ -2,6 +2,7 @@ package browsersniff
 
 import (
 	"encoding/json"
+	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -251,6 +252,31 @@ func TestRedactJSONBody_PreservesURLPathBase64Segments(t *testing.T) {
 	assert.Equal(t, "cdn.example.com", parsed["host"])
 	assert.Equal(t, "/objects/"+pathSeg+"/meta", parsed["path"])
 	assert.Empty(t, paths)
+}
+
+func TestRedactJSONBody_RedactsURLQueryAndUserinfoCredentials(t *testing.T) {
+	t.Parallel()
+
+	const jwt = "eyJhbGc.eyJzdWI.signaturevalue"
+	const pathSeg = "YWJjZGVmZ2hpamtsbW5vcA"
+	const pass = "s3cret-pass"
+	body := `{"url":"https://alice:` + pass + `@cdn.example.com/objects/` + pathSeg + `/meta?access_token=` + jwt + `&ok=1","href":"/callback?access_token=` + jwt + `&page=2"}`
+	redacted, paths := RedactJSONBody(body)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(redacted), &parsed))
+	urlVal, _ := parsed["url"].(string)
+	hrefVal, _ := parsed["href"].(string)
+	assert.NotContains(t, urlVal, jwt)
+	assert.NotContains(t, urlVal, pass)
+	assert.NotContains(t, hrefVal, jwt)
+	assert.Contains(t, urlVal, "/objects/"+pathSeg+"/meta")
+	assert.Contains(t, urlVal, "ok=1")
+	assert.Contains(t, hrefVal, "page=2")
+	assert.Contains(t, urlVal, url.QueryEscape(RedactedSentinel))
+	assert.Contains(t, hrefVal, url.QueryEscape(RedactedSentinel))
+	assert.Contains(t, paths, "url.pattern:url-credential")
+	assert.Contains(t, paths, "href.pattern:url-credential")
 }
 
 func TestRedactJSONBody_PhoneRequiresPlusPrefix(t *testing.T) {

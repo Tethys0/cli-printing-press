@@ -751,9 +751,8 @@ func hasNonTrivialToken(segment string) bool {
 	return false
 }
 
-// looksPrefixedOpaqueID requires a short type prefix plus an opaque tail.
-// Ordinary lowercase snake_case route words such as "read_progresses" match
-// the prefix/length shape but are literals, not application IDs.
+// The prefixed-ID regex also matches ordinary snake_case route words
+// (read_progresses). Require an opaque tail so those stay literal.
 func looksPrefixedOpaqueID(segment string) bool {
 	if !prefixedIDPattern.MatchString(segment) {
 		return false

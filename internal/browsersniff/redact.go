@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 	"unicode"
@@ -62,6 +63,25 @@ var (
 	// avoid false-positive redaction of timestamps, IDs, and order numbers.
 	redactPhonePattern      = regexp.MustCompile(`\+[1-9]\d{6,14}`)
 	redactAuthSchemePattern = regexp.MustCompile(`(?i)\b(?:Basic|Bearer|Token)\s+[A-Za-z0-9._+/=-]{8,}`)
+	redactURLQueryNames     = map[string]bool{
+		"access_token":  true,
+		"api_key":       true,
+		"api-key":       true,
+		"apikey":        true,
+		"x-api-key":     true,
+		"x_api_key":     true,
+		"token":         true,
+		"auth_token":    true,
+		"refresh_token": true,
+		"id_token":      true,
+		"key":           true,
+		"signature":     true,
+		"auth":          true,
+		"password":      true,
+		"secret":        true,
+		"authorization": true,
+		"client_secret": true,
+	}
 )
 
 // RedactHeaders returns a redacted copy of headers plus the sorted set of
@@ -98,10 +118,8 @@ func isRedactHeaderName(lowerName string) bool {
 	return false
 }
 
-// isRedactNestedHeaderKey matches credential-bearing HTTP header names when
-// they appear as JSON keys (Authorization, X-API-Key, x-auth-token). It does
-// not use the loose header-contains sweep, which would treat pagination
-// fields like token_field as headers.
+// Header-contains matching would treat pagination fields like token_field
+// as credentials; only exact header names and x-* auth headers qualify here.
 func isRedactNestedHeaderKey(name string) bool {
 	lower := strings.ToLower(strings.TrimSpace(name))
 	if redactHeaderExact[lower] {
@@ -129,10 +147,10 @@ func isRedactNestedHeaderKey(name string) bool {
 // values are replaced in place. Credential-bearing header values nested
 // in maps (Authorization, x-api-key, Basic/Bearer blobs) are redacted
 // even when the key is not an apiKey-shaped field name. URL / host /
-// path fields are left intact so long base64-shaped path segments are
-// not destroyed. If the body is not JSON, the raw string is regex-swept
-// for JWT / email / phone / auth-scheme patterns and the list contains
-// the pattern names that hit.
+// path fields keep opaque path segments; query and userinfo credentials
+// in those scalars are still stripped. If the body is not JSON, the raw
+// string is regex-swept for JWT / email / phone / auth-scheme patterns
+// and the list contains the pattern names that hit.
 func RedactJSONBody(body string) (string, []string) {
 	trimmed := strings.TrimSpace(body)
 	if trimmed == "" {
@@ -184,18 +202,57 @@ func redactJSONValue(value any, path string, paths map[string]bool) any {
 	}
 }
 
-// redactJSONValuePreservingURL walks nested objects under a URL/host/path
-// key so credential maps still get scrubbed, but never applies value-shape
-// redaction to the URL string itself.
+// Nested maps under url/host/path still carry header values that must be
+// scrubbed. Scalars keep path segments; only query/userinfo credentials go,
+// because a whole-string JWT/base64 sweep is what destroys endpoint URLs.
 func redactJSONValuePreservingURL(value any, path string, paths map[string]bool) any {
 	switch v := value.(type) {
 	case map[string]any:
 		return redactJSONValue(v, path, paths)
 	case []any:
 		return redactJSONValue(v, path, paths)
+	case string:
+		if redacted, pattern := redactURLLikeScalar(v); pattern != "" {
+			paths[joinPath(path, "pattern:"+pattern)] = true
+			return redacted
+		}
+		return v
 	default:
 		return value
 	}
+}
+
+func redactURLLikeScalar(s string) (string, string) {
+	inner := unwrapQuotedJSONString(s)
+	parsed, err := url.Parse(inner)
+	if err != nil || (parsed.User == nil && parsed.RawQuery == "") {
+		return s, ""
+	}
+
+	changed := false
+	if parsed.User != nil {
+		parsed.User = url.User(RedactedSentinel)
+		changed = true
+	}
+	query := parsed.Query()
+	for key, values := range query {
+		if !redactURLQueryNames[strings.ToLower(strings.TrimSpace(key))] {
+			continue
+		}
+		for i, value := range values {
+			if value == "" || value == RedactedSentinel {
+				continue
+			}
+			values[i] = RedactedSentinel
+			changed = true
+		}
+		query[key] = values
+	}
+	if !changed {
+		return s, ""
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.String(), "url-credential"
 }
 
 // isRedactBodyKey normalizes a key to lowercase with separators stripped
