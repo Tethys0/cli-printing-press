@@ -1126,6 +1126,33 @@ func TestSearch_CJKSubstringAndASCII(t *testing.T) {
 	}
 }
 
+func TestSearch_LikeFallbackPreservesTokenBoundaries(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "data.db")
+	s, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer s.Close()
+
+	items := []json.RawMessage{
+		json.RawMessage(`{"id":"spaced","value":"Phase 2 residential"}`),
+		json.RawMessage(`{"id":"other","value":"Phase 1 residential"}`),
+	}
+	if stored, failed, err := s.UpsertBatch("notes", items); err != nil {
+		t.Fatalf("UpsertBatch: %v", err)
+	} else if failed != 0 || stored != len(items) {
+		t.Fatalf("UpsertBatch stored=%d failed=%d, want stored=%d failed=0", stored, failed, len(items))
+	}
+
+	results, err := s.Search("phase-2", 10)
+	if err != nil {
+		t.Fatalf("Search(phase-2): %v", err)
+	}
+	if len(results) != 1 || !strings.Contains(string(results[0]), `"spaced"`) {
+		t.Fatalf("Search(phase-2) = %q, want the Phase 2 row", results)
+	}
+}
+
 func TestSearch_LikeEscapesWildcards(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "data.db")
 	s, err := Open(dbPath)
@@ -1135,8 +1162,8 @@ func TestSearch_LikeEscapesWildcards(t *testing.T) {
 	defer s.Close()
 
 	items := []json.RawMessage{
-		json.RawMessage(`{"id":"pct","note":"100% complete"}`),
-		json.RawMessage(`{"id":"other","note":"1000 complete"}`),
+		json.RawMessage(`{"id":"under","note":"xa_y"}`),
+		json.RawMessage(`{"id":"other","note":"xaby"}`),
 	}
 	if stored, failed, err := s.UpsertBatch("notes", items); err != nil {
 		t.Fatalf("UpsertBatch: %v", err)
@@ -1144,12 +1171,12 @@ func TestSearch_LikeEscapesWildcards(t *testing.T) {
 		t.Fatalf("UpsertBatch stored=%d failed=%d, want stored=%d failed=0", stored, failed, len(items))
 	}
 
-	results, err := s.Search("0%", 10)
+	results, err := s.Search("a_", 10)
 	if err != nil {
-		t.Fatalf("Search(0%%): %v", err)
+		t.Fatalf("Search(a_): %v", err)
 	}
-	if len(results) != 1 || !strings.Contains(string(results[0]), `"pct"`) {
-		t.Fatalf("Search(0%%) = %q, want only the percent row", results)
+	if len(results) != 1 || !strings.Contains(string(results[0]), `"under"`) {
+		t.Fatalf("Search(a_) = %q, want only the underscore row", results)
 	}
 }
 

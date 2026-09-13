@@ -1431,7 +1431,7 @@ func (s *Store) Search(query string, limit int, resourceTypes ...string) ([]json
 		args []any
 	)
 	if ftsNeedsLikeFallback(tokens) {
-		clause, likeArgs := ftsLikeClause("f", query)
+		clause, likeArgs := ftsLikeClause("f", tokens)
 		if clause == "" {
 			return nil, nil
 		}
@@ -1581,19 +1581,18 @@ func escapeLikePattern(s string) string {
 	return s
 }
 
-// ftsLikeClause AND-s LIKE predicates for each whitespace-delimited run.
-// Trigram MATCH cannot hit queries shorter than 3 runes (營造, 10.0.0.1).
-func ftsLikeClause(alias, query string) (string, []any) {
-	fields := strings.Fields(strings.TrimSpace(query))
-	if len(fields) == 0 {
+// ftsLikeClause AND-s LIKE predicates for the already-parsed FTS tokens.
+// Trigram MATCH cannot hit queries shorter than 3 runes (營造, phase-2).
+func ftsLikeClause(alias string, tokens []string) (string, []any) {
+	if len(tokens) == 0 {
 		return "", nil
 	}
-	parts := make([]string, 0, len(fields))
-	args := make([]any, 0, len(fields)*2)
+	parts := make([]string, 0, len(tokens))
+	args := make([]any, 0, len(tokens)*2)
 	contentCol := alias + ".content"
 	idCol := alias + ".id"
-	for _, field := range fields {
-		pattern := "%" + escapeLikePattern(field) + "%"
+	for _, token := range tokens {
+		pattern := "%" + escapeLikePattern(token) + "%"
 		parts = append(parts, "("+contentCol+" LIKE ? ESCAPE '\\' OR "+idCol+" LIKE ? ESCAPE '\\')")
 		args = append(args, pattern, pattern)
 	}
